@@ -140,6 +140,80 @@ app.post("/s3/upload", upload.single("file"), async (req, res) => {
 
 });
 
+/**
+ * @swagger
+ * /s3/upload-public:
+ *   post:
+ *     summary: Upload file and make it public
+ *     tags: [S3]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               S3_BUCKET:
+ *                 type: string
+ *               S3_REGION:
+ *                 type: string
+ *               S3_ACCESS_KEY_ID:
+ *                 type: string
+ *               S3_ACCESS_KEY_SECRET:
+ *                 type: string
+ *               S3_ENDPOINT:
+ *                 type: string
+ *               folder:
+ *                 type: string
+ *               file:
+ *                 type: string
+ *                 format: binary
+ */
+app.post("/s3/upload-public", upload.single("file"), async (req, res) => {
+
+  try {
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "file is required"
+      });
+    }
+
+    const {
+      S3_BUCKET,
+      S3_REGION,
+      S3_ACCESS_KEY_ID,
+      S3_ACCESS_KEY_SECRET,
+      S3_ENDPOINT,
+      folder
+    } = req.body;
+
+    const s3 = new S3Service({
+      bucket: S3_BUCKET,
+      region: S3_REGION,
+      accessKey: S3_ACCESS_KEY_ID,
+      secretKey: S3_ACCESS_KEY_SECRET,
+      endpoint: S3_ENDPOINT
+    });
+
+    const result = await s3.uploadPublicFile(req.file, folder);
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (err) {
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
+  }
+
+});
 
 const PORT = 3000;
 

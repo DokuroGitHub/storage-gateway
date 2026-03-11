@@ -14,6 +14,7 @@ class S3Service {
   constructor({ bucket, region, accessKey, secretKey, endpoint }) {
 
     this.bucket = bucket;
+    this.endpoint = endpoint;
 
     this.s3 = new S3Client({
       region: region,
@@ -70,6 +71,27 @@ class S3Service {
     };
   }
 
+  async uploadPublicFile(file, folder = "") {
+
+    const key = folder
+      ? `${folder}/${file.originalname}`
+      : file.originalname;
+
+    await this.s3.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+      ACL: "public-read"
+    }));
+
+    const url = `${this.endpoint}/${this.bucket}/${key}`;
+
+    return {
+      key,
+      url
+    };
+  }
 }
 
 module.exports = S3Service;

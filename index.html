@@ -29,13 +29,25 @@
   </option>
   <option value="custom">Custom...</option>
 </select>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ASR WebSocket Test</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    button { padding: 10px 20px; margin-right: 10px; }
+    textarea { width: 100%; margin-top: 10px; }
+    input, select { width: 100%; padding: 8px; margin-bottom: 10px; }
+    #startMsg { height: 120px; font-family: monospace; }
+    #transcript { height: 120px; }
+    #rawBox { height: 200px; font-family: monospace; }
+  </style>
+</head>
+<body>
 
 <label>WebSocket URL:</label>
-<input 
-  type="text" 
-  id="wsUrl" 
-  value="wss://ci-bo-kong-ws.frt.vn/bo-lc-proctor-gateway/ws/asr"
-/>
+<input type="text" id="wsUrl" />
 
 <label>Start Message (JSON):</label>
 <textarea id="startMsg">
@@ -52,7 +64,11 @@
 
 <p><b>Duration:</b> <span id="duration">0</span> sec</p>
 
-<textarea id="transcript" placeholder="Transcription..."></textarea>
+<label>Transcript:</label>
+<textarea id="transcript" readonly></textarea>
+
+<label>Raw Responses:</label>
+<textarea id="rawBox" readonly></textarea>
 
 <script>
 let ws;
@@ -65,19 +81,19 @@ let durationTimer;
 let totalText = "";
 
 const transcriptBox = document.getElementById("transcript");
+const rawBox = document.getElementById("rawBox");
 const durationEl = document.getElementById("duration");
 const wsInput = document.getElementById("wsUrl");
 const urlSelect = document.getElementById("urlSelect");
 const startMsgBox = document.getElementById("startMsg");
 
-// ✅ Load saved
+// Load saved
 window.onload = () => {
   const savedUrl = localStorage.getItem("wsUrl");
   const savedMsg = localStorage.getItem("startMsg");
 
   if (savedUrl) {
     wsInput.value = savedUrl;
-
     const options = Array.from(urlSelect.options);
     const match = options.find(o => o.value === savedUrl);
     urlSelect.value = match ? savedUrl : "custom";
@@ -88,14 +104,14 @@ window.onload = () => {
   }
 };
 
-// ✅ Dropdown → Input
+// Dropdown → Input
 urlSelect.onchange = () => {
   if (urlSelect.value !== "custom") {
     wsInput.value = urlSelect.value;
   }
 };
 
-// ✅ Input → Dropdown
+// Input → Dropdown
 wsInput.oninput = () => {
   const options = Array.from(urlSelect.options);
   const match = options.find(o => o.value === wsInput.value);
@@ -114,20 +130,16 @@ document.getElementById("startBtn").onclick = async () => {
   let startMsg;
   try {
     startMsg = JSON.parse(rawMsg);
-  } catch (e) {
-    alert("❌ Invalid JSON in Start Message");
+  } catch {
+    alert("Invalid JSON");
     return;
   }
 
-  // ✅ RESET STATE HERE
+  // ✅ RESET
   totalText = "";
   transcriptBox.value = "";
+  rawBox.value = "";
   durationEl.innerText = "0";
-
-  // (optional) reset chunk counter if you added logging
-  if (typeof chunkCount !== "undefined") {
-    chunkCount = 0;
-  }
 
   localStorage.setItem("wsUrl", url);
   localStorage.setItem("startMsg", rawMsg);
@@ -135,48 +147,42 @@ document.getElementById("startBtn").onclick = async () => {
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
 
-  ws.onopen = async () => {
-    console.log("✅ WS connected");
-
+  ws.onopen = () => {
     ws.send(JSON.stringify(startMsg));
 
     startTime = Date.now();
-
     durationTimer = setInterval(() => {
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      durationEl.innerText = duration;
+      durationEl.innerText = ((Date.now() - startTime) / 1000).toFixed(2);
     }, 100);
 
     startRecording();
   };
 
   ws.onmessage = (msg) => {
+    // raw log
+    const time = new Date().toISOString();
+    rawBox.value += `[${time}] ${msg.data}\n`;
+    rawBox.scrollTop = rawBox.scrollHeight;
+
     try {
       const data = JSON.parse(msg.data);
-      console.log(data);
 
       if (data.final) {
         totalText += data.final + " ";
         transcriptBox.value = totalText;
-        return;
-      }
-
-      if (data.partial) {
+      } else if (data.partial) {
         transcriptBox.value = totalText + data.partial;
-        return;
       }
 
-    } catch (e) {
-      console.log("⚠️ Non-JSON message");
-    }
+    } catch {}
   };
 
   ws.onerror = (err) => {
-    console.error("❌ WS error:", err);
+    console.error("WS error:", err);
   };
 
   ws.onclose = () => {
-    console.log("🔌 WS closed");
+    console.log("WS closed");
   };
 
   document.getElementById("startBtn").disabled = true;
@@ -192,11 +198,7 @@ document.getElementById("stopBtn").onclick = () => {
   stopRecording();
   clearInterval(durationTimer);
 
-  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-  durationEl.innerText = duration;
-
-  console.log("⏱ FINAL duration:", duration);
-  console.log("📝 FINAL transcript:", totalText);
+  durationEl.innerText = ((Date.now() - startTime) / 1000).toFixed(2);
 
   document.getElementById("startBtn").disabled = false;
   document.getElementById("stopBtn").disabled = true;
@@ -220,7 +222,6 @@ async function startRecording() {
 
     for (let i = 0; i < pcm16.byteLength; i += chunkSize) {
       const chunk = pcm16.slice(i, i + chunkSize);
-
       if (ws && ws.readyState === 1) {
         ws.send(chunk);
       }

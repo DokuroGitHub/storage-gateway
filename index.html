@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ASR WebSocket Test</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    button { padding: 10px 20px; margin-right: 10px; }
+    textarea { width: 100%; height: 150px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<h2>ASR WebSocket Test</h2>
+
+<button id="startBtn">Start</button>
+<button id="stopBtn" disabled>End</button>
+
+<p><b>Duration:</b> <span id="duration">0</span> sec</p>
+
+<textarea id="transcript" placeholder="Transcription..."></textarea>
+
+<script>
+let ws;
+let audioContext;
+let processor;
+let input;
+let globalStream;
+let startTime;
+let durationTimer;
+let totalText = "";
+
+// let url = "ws://ci-bo-lc-ai-asr.frt.local/ws/asr";
+let url = "wss://ci-bo-kong-ws.frt.vn/bo-lc-proctor-gateway/ws/asr";
+
+const transcriptBox = document.getElementById("transcript");
+const durationEl = document.getElementById("duration");
+
+document.getElementById("startBtn").onclick = async () => {
+  ws = new WebSocket(url);
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = async () => {
+    console.log("✅ WS connected");
+
+    const startMsg = {
+      event: "start",
+      language: "vi-VN",
+      phrases: ["Năm Tính Năng nổi bật", "Mẹ và bé", "Mẹ có Biết?"],
+      format: {
+        sample_rate: 16000,
+      },
+    };
+
+    console.log(startMsg);
+    ws.send(JSON.stringify(startMsg));
+
+    startTime = Date.now();
+
+    // realtime duration update
+    durationTimer = setInterval(() => {
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      durationEl.innerText = duration;
+    }, 100);
+
+    startRecording();
+  };
+
+    ws.onmessage = (msg) => {
+    console.log(msg.data);
+
+    try {
+        const data = JSON.parse(msg.data);
+        console.log(data);
+
+        // ✅ FINAL result → append permanently
+        if (data.final) {
+        totalText += data.final + " ";
+        transcriptBox.value = totalText;
+        return;
+        }
+
+        // ✅ PARTIAL result → show temporary (live typing)
+        if (data.partial) {
+        transcriptBox.value = totalText + data.partial;
+        return;
+        }
+
+    } catch (e) {
+        console.log("⚠️ Non-JSON message");
+    }
+    };
+
+  ws.onerror = (err) => {
+    console.error("❌ WS error:", err);
+  };
+
+  ws.onclose = () => {
+    console.log("🔌 WS closed");
+  };
+
+  document.getElementById("startBtn").disabled = true;
+  document.getElementById("stopBtn").disabled = false;
+};
+
+document.getElementById("stopBtn").onclick = () => {
+  if (ws) {
+    const endMsg = { event: "end" };
+    console.log("📤 SEND end:", endMsg);
+
+    ws.send(JSON.stringify(endMsg));
+    ws.close();
+  }
+
+  stopRecording();
+
+  clearInterval(durationTimer);
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  durationEl.innerText = duration;
+
+  console.log("⏱ FINAL duration:", duration);
+  console.log("📝 FINAL transcript:", totalText);
+
+  document.getElementById("startBtn").disabled = false;
+  document.getElementById("stopBtn").disabled = true;
+};
+
+async function startRecording() {
+  globalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  audioContext = new (window.AudioContext || window.webkitAudioContext)({
+    sampleRate: 16000
+  });
+
+  input = audioContext.createMediaStreamSource(globalStream);
+  processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+  processor.onaudioprocess = (e) => {
+    const floatData = e.inputBuffer.getChannelData(0);
+    const pcm16 = floatTo16BitPCM(floatData);
+
+    const chunkSize = 640; // 20ms @16kHz
+
+    for (let i = 0; i < pcm16.byteLength; i += chunkSize) {
+      const chunk = pcm16.slice(i, i + chunkSize);
+
+      if (ws && ws.readyState === 1) {
+        ws.send(chunk);
+      }
+    }
+  };
+
+  input.connect(processor);
+  processor.connect(audioContext.destination);
+}
+
+function stopRecording() {
+  if (processor) processor.disconnect();
+  if (input) input.disconnect();
+  if (audioContext) audioContext.close();
+
+  if (globalStream) {
+    globalStream.getTracks().forEach(track => track.stop());
+  }
+}
+
+function floatTo16BitPCM(float32Array) {
+  const buffer = new ArrayBuffer(float32Array.length * 2);
+  const view = new DataView(buffer);
+
+  let offset = 0;
+  for (let i = 0; i < float32Array.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+
+  return buffer;
+}
+</script>
+
+</body>
+</html>
